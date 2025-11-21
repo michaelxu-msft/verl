@@ -78,7 +78,7 @@ from verl.utils.distributed import initialize_global_process_group_ray
 from verl.utils.import_utils import deprecated
 from verl.utils.model import get_lora_rank_from_adapter
 from verl.utils.profiler import GPUMemoryLogger
-from verl.utils.ray_utils import ray_noset_visible_devices
+from verl.utils.ray_utils import ray_noset_visible_devices, get_event_loop
 from verl.utils.torch_functional import get_response_mask, pad_2d_list_to_length
 from verl.utils.vllm import TensorLoRARequest, VLLMHijack, is_version_ge
 from verl.utils.vllm.vllm_fp8_utils import apply_vllm_fp8_patches, is_fp8_model, load_quanted_weights
@@ -572,7 +572,7 @@ class vLLMAsyncRollout(BaseRollout):
                     address = f"tcp://{ip}:{port}"
             self.socket.bind(address)
 
-        loop = asyncio.get_running_loop()
+        loop = get_event_loop()
         self.zmq_loop_task = loop.create_task(self._loop_forever())
 
         return address
