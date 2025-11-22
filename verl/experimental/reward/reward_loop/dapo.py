@@ -36,6 +36,19 @@ class DAPORewardLoopManager(RewardLoopManagerBase):
         self.reward_router_address = reward_router_address
         self.reward_model_tokenizer = reward_model_tokenizer
 
+        # Sandbox Fusion Config
+        sandbox_config = config.reward_model.get("sandbox_fusion")
+        if sandbox_config:
+            self.sandbox_fusion_url = sandbox_config.get("url")
+            import multiprocessing
+            sandbox_manager = multiprocessing.Manager()
+            self.concurrent_semaphore = sandbox_manager.Semaphore(sandbox_config.get("max_concurrent", 64))
+            self.memory_limit_mb = sandbox_config.get("memory_limit_mb", 1024)
+        else:
+            self.sandbox_fusion_url = None
+            self.concurrent_semaphore = None
+            self.memory_limit_mb = None
+
         if self.overlong_buffer_cfg is not None:
             assert self.max_resp_len is not None, (
                 f"max_resp_len must be provided if {overlong_buffer_cfg=}, but got None"
@@ -67,6 +80,9 @@ class DAPORewardLoopManager(RewardLoopManagerBase):
                 extra_info=extra_info,
                 reward_router_address=self.reward_router_address,
                 reward_model_tokenizer=self.reward_model_tokenizer,
+                sandbox_fusion_url=self.sandbox_fusion_url,
+                concurrent_semaphore=self.concurrent_semaphore,
+                memory_limit_mb=self.memory_limit_mb,
             )
         else:
             result = await self.loop.run_in_executor(
@@ -78,6 +94,9 @@ class DAPORewardLoopManager(RewardLoopManagerBase):
                     extra_info=extra_info,
                     reward_router_address=self.reward_router_address,
                     reward_model_tokenizer=self.reward_model_tokenizer,
+                    sandbox_fusion_url=self.sandbox_fusion_url,
+                    concurrent_semaphore=self.concurrent_semaphore,
+                    memory_limit_mb=self.memory_limit_mb,
                 ),
             )
 
