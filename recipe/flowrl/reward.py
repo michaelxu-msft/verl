@@ -21,22 +21,7 @@ import ray
 
 from verl import DataProto
 from verl.trainer.ppo.reward import compute_reward, get_custom_reward_fn
-
-from rllm.rewards.code_reward import rllm_reward_fn_code
-
-
-def _default_compute_score(data_source, solution_str, ground_truth, **kwargs):
-    """Adapter wrapper that maps VERL's interface to rllm's interface.
-    
-    VERL calls with: data_source, solution_str, ground_truth
-    rllm expects: data_source, llm_solution, ground_truth
-    """
-    return rllm_reward_fn_code(
-        data_source=data_source,
-        llm_solution=solution_str,  # Map solution_str -> llm_solution
-        ground_truth=ground_truth,
-        **kwargs
-    )
+from verl.utils.reward_score import default_compute_score
 
 
 def load_reward_manager(config, tokenizer, num_examine, **reward_kwargs):
@@ -70,17 +55,22 @@ def load_reward_manager(config, tokenizer, num_examine, **reward_kwargs):
     final_compute_score = compute_score
 
     if compute_score is None:
+        # Use VERL's default_compute_score, but bind sandbox_fusion parameters if configured
         sandbox_config = config.reward_model.get("sandbox_fusion")
         sandbox_url = sandbox_config.get("url") if sandbox_config else None
         if sandbox_url:
             sandbox_manager = multiprocessing.Manager()
             # Create a semaphore to control concurrent access to the sandbox
             _concurrent_semaphore = sandbox_manager.Semaphore(sandbox_config.get("max_concurrent", 64))
+            memory_limit_mb = sandbox_config.get("memory_limit_mb", 1024)
             final_compute_score = partial(
-                _default_compute_score, sandbox_fusion_url=sandbox_url, concurrent_semaphore=_concurrent_semaphore
+                default_compute_score,
+                sandbox_fusion_url=sandbox_url,
+                concurrent_semaphore=_concurrent_semaphore,
+                memory_limit_mb=memory_limit_mb
             )
         else:
-            final_compute_score = _default_compute_score
+            final_compute_score = default_compute_score
 
     # Instantiate and return the reward manager with the specified parameters
     return reward_manager_cls(
