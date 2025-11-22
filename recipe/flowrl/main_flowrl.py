@@ -23,6 +23,7 @@ import ray
 from omegaconf import OmegaConf
 
 from verl.trainer.ppo.reward import load_reward_manager
+from verl.workers.reward_manager.code import CodeRewardManager
 from verl.utils.device import is_cuda_available
 
 
