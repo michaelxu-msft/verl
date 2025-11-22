@@ -13,7 +13,21 @@ def _patched_signal(signalnum, handler):
 
 signal.signal = _patched_signal
 
-from rllm.rewards.code_reward import rllm_reward_fn_code as compute_score
+from rllm.rewards.code_reward import rllm_reward_fn_code
+
+# Adapter wrapper to map VERL interface to rllm interface
+def compute_score(data_source, solution_str, ground_truth, **kwargs):
+    """Adapter wrapper that maps VERL's interface to rllm's interface.
+    
+    VERL calls with: data_source, solution_str, ground_truth
+    rllm expects: data_source, llm_solution, ground_truth
+    """
+    return rllm_reward_fn_code(
+        data_source=data_source,
+        llm_solution=solution_str,  # Map solution_str -> llm_solution
+        ground_truth=ground_truth,
+        **kwargs
+    )
 
 # Re-export it
 __all__ = ['compute_score']
