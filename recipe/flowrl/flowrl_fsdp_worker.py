@@ -59,13 +59,13 @@ from verl.utils.model import convert_weight_keys
 from verl.utils.profiler import log_gpu_memory_usage
 from verl.utils.py_functional import convert_to_regular_types
 from verl.workers.config import FSDPEngineConfig
-from verl.workers.fsdp_workers import ActorRolloutRefWorker, get_sharding_strategy, get_vl_model_vision_tower
+from verl.workers.fsdp_workers import AsyncActorRolloutRefWorker, get_sharding_strategy, get_vl_model_vision_tower
 
 logger = logging.getLogger(__file__)
 logger.setLevel(os.getenv("VERL_LOGGING_LEVEL", "WARN"))
 
 
-class FlowRLActorRolloutRefWorker(ActorRolloutRefWorker):
+class FlowRLActorRolloutRefWorker(AsyncActorRolloutRefWorker):
     """
     FlowRL version of ActorRolloutRefWorker that uses FlowRLActor.
 
