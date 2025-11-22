@@ -26,6 +26,18 @@ from verl.trainer.ppo.reward import load_reward_manager
 from verl.workers.reward_manager.code import CodeRewardManager
 from verl.utils.device import is_cuda_available
 
+# CRITICAL: Import all rllm modules in the main thread BEFORE creating Ray actors
+# to avoid signal.signal() errors in Ray actor processes.
+# This must happen at module level in the main process.
+try:
+    # Import the reward module which contains rllm imports
+    # This forces all rllm signal handling to occur in the main thread
+    from recipe.flowrl import reward
+    print("Successfully pre-loaded rllm modules in main thread")
+except ImportError as e:
+    print(f"Warning: Could not pre-load rllm modules: {e}")
+    reward = None
+
 
 @hydra.main(config_path="config", config_name="flowrl_trainer", version_base=None)
 def main(config):
