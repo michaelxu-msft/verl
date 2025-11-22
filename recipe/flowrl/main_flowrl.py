@@ -22,7 +22,6 @@ import hydra
 import ray
 from omegaconf import OmegaConf
 
-from verl.trainer.ppo.reward import load_reward_manager
 from verl.workers.reward_manager.code import CodeRewardManager
 from verl.utils.device import is_cuda_available
 
@@ -33,9 +32,13 @@ try:
     # Import the reward module which contains rllm imports
     # This forces all rllm signal handling to occur in the main thread
     from recipe.flowrl import reward
+    # Use the custom load_reward_manager that uses rllm
+    from recipe.flowrl.reward import load_reward_manager
     print("Successfully pre-loaded rllm modules in main thread")
 except ImportError as e:
     print(f"Warning: Could not pre-load rllm modules: {e}")
+    # Fallback to the standard one if custom reward module fails
+    from verl.trainer.ppo.reward import load_reward_manager
     reward = None
 
 
