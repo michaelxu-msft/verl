@@ -1,6 +1,8 @@
 import signal
+import sys
 
 # Monkey-patch signal.signal to ignore errors in non-main threads (Ray actors)
+# This must happen before any rllm imports
 _original_signal = signal.signal
 
 def _patched_signal(signalnum, handler):
@@ -9,9 +11,15 @@ def _patched_signal(signalnum, handler):
     except ValueError:
         # Signal handlers can only be set in main thread
         # Silently ignore this in Ray actor threads
-        pass
+        return None  # Return None instead of the previous handler
+    except Exception as e:
+        # Catch any other errors and silently ignore
+        return None
 
 signal.signal = _patched_signal
+
+# Also patch it in sys.modules to ensure all imports see the patched version
+sys.modules['signal'].signal = _patched_signal
 
 from rllm.rewards.code_reward import rllm_reward_fn_code
 
