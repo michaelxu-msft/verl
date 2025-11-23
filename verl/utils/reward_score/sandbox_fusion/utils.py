@@ -319,7 +319,7 @@ if __name__ == '__main__':
     except Exception as e:
         error_msg = f"API Request Exception during check_correctness for case {case_index + 1}: {e}"
         logger.error(f"Case {case_index + 1}: {error_msg}")
-        traceback.print_exc()
+        logger.debug(traceback.format_exc())
 
     metadata = {
         "case_index": case_index,
@@ -543,7 +543,7 @@ def check_correctness(
 
             except Exception as exc:
                 logger.error(f"Test case {index} generated an exception: {exc}")
-                traceback.print_exc()
+                logger.debug(traceback.format_exc())
                 results[index] = -1  # Mark as API/internal error
                 metadata_list[index] = {
                     "case_index": index,
