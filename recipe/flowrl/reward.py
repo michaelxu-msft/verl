@@ -16,13 +16,13 @@ import multiprocessing
 import signal
 import sys
 from functools import partial
+import json
 
 import ray
 
 from verl import DataProto
 from verl.trainer.ppo.reward import compute_reward, get_custom_reward_fn
 from verl.utils.reward_score import default_compute_score
-
 from rllm.rewards.code_reward import rllm_reward_fn_code
 
 
@@ -34,12 +34,26 @@ def _default_compute_score(data_source, solution_str, ground_truth, **kwargs):
     
     This is used when sandbox_fusion is NOT configured.
     """
-    return rllm_reward_fn_code(
-        data_source=data_source,
-        llm_solution=solution_str,  # Map solution_str -> llm_solution
-        ground_truth=ground_truth,
-        **kwargs
-    )
+    try:
+        # Parse ground truth (test cases)
+        if isinstance(ground_truth, str):
+            test_cases = json.loads(ground_truth)
+        else:
+            test_cases = ground_truth
+        
+        # Call rllm reward function
+        result = rllm_reward_fn_code(
+            data_source=data_source,
+            llm_solution=solution_str,
+            ground_truth=test_cases,
+            **kwargs
+        )
+        
+        return float(result) if isinstance(result, (bool, int, float)) else float(result[0])
+    
+    except Exception as e:
+        print(f"Error computing code reward: {e}")
+        return 0.0
 
 
 def load_reward_manager(config, tokenizer, num_examine, **reward_kwargs):
