@@ -24,6 +24,7 @@ from verl import DataProto
 from verl.trainer.ppo.reward import compute_reward, get_custom_reward_fn
 from verl.utils.reward_score import default_compute_score
 from rllm.environments.appworld.signal_patch import apply_signal_patch
+apply_signal_patch()
 from rllm.rewards.code_reward import rllm_reward_fn_code
 
 
