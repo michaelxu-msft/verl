@@ -1,0 +1,394 @@
+apiVersion: batch.volcano.sh/v1alpha1
+kind: Job
+metadata:
+  generateName: michaelxu-flowrl-
+  namespace: msr-redmond
+spec:
+  minAvailable: 1
+  schedulerName: volcano
+  queue: msr-redmond
+  plugins:
+    ssh: []
+    svc: []
+    env: []        # VC_* envs (host lists, etc.)
+    pytorch: []    # set standard torch env vars
+  policies:
+    - event: TaskCompleted
+      action: CompleteJob
+    - event: PodFailed
+      action: AbortJob
+  tasks:
+    - replicas: 1
+      name: master
+      template:
+        spec:
+          hostNetwork: true
+          dnsPolicy: ClusterFirstWithHostNet
+          restartPolicy: Never
+          volumes:
+            - name: data
+              persistentVolumeClaim:
+                claimName: pvc-local-msr-redmond-01
+            - name: dshm
+              emptyDir:
+                medium: Memory
+                sizeLimit: 100Gi
+          tolerations:
+            - key: "nvidia.com/gpu"
+              operator: "Exists"
+              effect: "NoSchedule"
+          # imagePullSecrets:
+          #   - name: nlpaml
+          containers:
+            - name: master
+              image: verlai/verl:vllm011.latest
+              imagePullPolicy: IfNotPresent
+              securityContext:
+                privileged: true
+              env:
+                - name: WANDB_API_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: michaelxu-wandb
+                      key: api-key
+                - name: WANDB_BASE_URL
+                  value: "https://microsoft-research.wandb.io"
+                - name: WANDB_PROJECT
+                  value: "Volcano-Slime-FlowRL-CODE"
+                - name: GLOO_SOCKET_IFNAME
+                  value: "eno1"
+                - name: NCCL_SOCKET_IFNAME
+                  value: "eno1"
+                - name: NCCL_IB_DISABLE
+                  value: "0"
+                - name: NCCL_IB_HCA
+                  value: "mlx5"
+                - name: VERL_HOME
+                  value: "/data/users/michaelxu/verl"
+                - name: DATA_DIR
+                  value: "/data/users/michaelxu/verl/data"
+                - name: RAY_DATA_HOME
+                  value: "/data/users/michaelxu/verl/data"
+                - name: VLLM_USE_V1
+                  value: "1"
+              resources:
+                requests:
+                  cpu: "180"
+                  memory: "2600Gi"
+                  nvidia.com/gpu: "8"
+                  rdma/rdma_shared_device_a: "1"
+                limits:
+                  cpu: "180"
+                  memory: "2600Gi"
+                  nvidia.com/gpu: "8"
+                  rdma/rdma_shared_device_a: "1"
+              command:
+                - /bin/bash
+                - "-c"
+                - |
+                  echo "Starting Ray head node at $VC_MASTER_HOSTS"
+                  ray start --head --node-ip-address $VC_MASTER_HOSTS --port=6379 --dashboard-host=0.0.0.0 --num-gpus=8 --disable-usage-stats
+                  
+                  # Wait for worker nodes to join
+                  DESIRED_NODES=$((VC_WORKER_NUM + 1))
+                  NODE_COUNT=0
+                  echo "Waiting for ${DESIRED_NODES} nodes to join Ray cluster..."
+                  while [[ "$NODE_COUNT" -lt "$DESIRED_NODES" ]]; do
+                    NODE_COUNT=$(ray status 2>/dev/null | grep -oP 'node_' | wc -l || echo "0")
+                    echo "Current nodes: $NODE_COUNT / $DESIRED_NODES"
+                    sleep 5
+                  done
+                  echo "Ray cluster ready with ${DESIRED_NODES} nodes!"
+                  
+                  # Run script on head node
+                  mkdir -p /workspace
+                  # Install rllm package for custom reward functions
+                  cd /workspace
+                  git clone https://github.com/michaelxu-msft/rllm.git && cd rllm && pip3 install --no-deps -e .
+                  
+                  # Then install VeRL
+                  cd /workspace
+                  git clone https://github.com/michaelxu-msft/verl.git && cd verl && pip3 install --no-deps -e .
+                  
+
+                  # Download model if it doesn't exist
+                  MODEL_NAME="deepseek-ai/DeepSeek-R1-Distill-Qwen-7B"
+                  if [ ! -d "${DATA_DIR}/models/${MODEL_NAME}" ]; then
+                      echo "Downloading model ${MODEL_NAME}..."
+                      huggingface-cli download $MODEL_NAME \
+                        --repo-type model \
+                        --resume-download \
+                        --local-dir $DATA_DIR/models/$MODEL_NAME \
+                        --local-dir-use-symlinks False \
+                        --exclude *.pth
+                  else
+                      echo "Model ${MODEL_NAME} already exists at ${DATA_DIR}/models/${MODEL_NAME}"
+                  fi
+
+                  # Download unified FlowRL dataset
+                  if [ ! -d "${DATA_DIR}/data/flowrl-data" ]; then
+                      echo "Downloading FlowRL data collection..."
+                      hf download --repo-type dataset xuekai/flowrl-data-collection \
+                          --local-dir "${DATA_DIR}/data/flowrl-data"
+                  else
+                      echo "FlowRL data collection already exists at ${DATA_DIR}/data/flowrl-data"
+                  fi
+                                  
+
+                  RAY_ADDRESS="http://${VC_MASTER_HOSTS}:8265" # The Ray cluster address to connect to
+                  # Use the standalone sandbox deployment with load balancer
+                  SANDBOX_FUSION_URL="http://flowrl-sandbox-lb.msr-redmond.svc.cluster.local:8080/run_code"
+                  echo "Sandbox LoadBalancer URL: ${SANDBOX_FUSION_URL}"
+                  WORKING_DIR="${PWD}" # The local directory to package to the Ray cluster
+                  RUNTIME_ENV="./recipe/dapo/runtime_env.yaml" # This sets environment variables for the Ray cluster
+                  NNODES=${DESIRED_NODES:-1}
+                  TRAIN_FILE="['/data/users/michaelxu/datasets/flowrl-data/code_data/deepcoder_train-00000-of-00005.parquet','/data/users/michaelxu/datasets/flowrl-data/code_data/deepcoder_train-00001-of-00005.parquet','/data/users/michaelxu/datasets/flowrl-data/code_data/deepcoder_train-00002-of-00005.parquet','/data/users/michaelxu/datasets/flowrl-data/code_data/deepcoder_train-00003-of-00005.parquet','/data/users/michaelxu/datasets/flowrl-data/code_data/deepcoder_train-00004-of-00005.parquet']"
+                  TEST_FILE="['/data/users/michaelxu/datasets/flowrl-data/code_data/test_livecodebench-00000-of-00005.parquet','/data/users/michaelxu/datasets/flowrl-data/code_data/test_livecodebench-00001-of-00005.parquet','/data/users/michaelxu/datasets/flowrl-data/code_data/test_livecodebench-00002-of-00005.parquet','/data/users/michaelxu/datasets/flowrl-data/code_data/test_livecodebench-00003-of-00005.parquet','/data/users/michaelxu/datasets/flowrl-data/code_data/test_livecodebench-00004-of-00005.parquet']"
+                  # gen_dp=8  # Data parallelism for vLLM rollout
+                  # Init VeRL Project.sh here
+                  project_name='DAPO'
+                  exp_name="DAPO-${MODEL_NAME}-Code-VLLM"
+
+                  # Algorithm settings
+                  adv_estimator=grpo
+
+                  # KL settings (ref policy needed for FlowRL, but KL penalty disabled)
+                  use_kl_in_reward=False  # Enable ref policy for ref_log_prob (needed for FlowRL loss)
+                  kl_coef=0.0
+                  use_kl_loss=True
+                  kl_loss_coef=0.0
+
+                  # Clip parameters
+                  clip_ratio_low=0.2
+                  clip_ratio_high=0.28
+
+                  # Sequence lengths 
+                  max_prompt_length=$((1024 * 2))
+                  max_response_length=$((1024 * 8))
+
+                  # Overlong buffer for very long responses
+                  enable_overlong_buffer=True
+                  overlong_buffer_len=$((1024 * 2))
+                  overlong_penalty_factor=1.0
+
+                  # Batch sizes
+                  train_prompt_bsz=256
+                  gen_prompt_bsz=$((train_prompt_bsz * 3))
+                  n_resp_per_prompt=8
+                  train_prompt_mini_bsz=32
+
+                  # Checkpoint saving frequency (-1 to disable periodic saves)
+                  save_freq=-1
+
+                  # Ray
+                  RAY_ADDRESS=${RAY_ADDRESS:-"http://localhost:8265"}
+                  WORKING_DIR=${WORKING_DIR:-"${PWD}"}
+                  RUNTIME_ENV=${RUNTIME_ENV:-"${WORKING_DIR}/verl/trainer/runtime_env.yaml"}
+                  NNODES=${NNODES:-1}
+
+                  # Paths
+                  MODEL_PATH=${MODEL_PATH:-"${RAY_DATA_HOME}/models/${MODEL_NAME}"}
+                  CKPTS_DIR=${CKPTS_DIR:-"${RAY_DATA_HOME}/outputs/ckpts/${project_name}/${exp_name}"}
+                  TRAIN_FILE=${TRAIN_FILE:-"${RAY_DATA_HOME}/dapo-math-17k.parquet"}
+                  TEST_FILE=${TEST_FILE:-"${RAY_DATA_HOME}/aime-2024.parquet"}
+
+                  # Sampling
+                  temperature=1.0
+                  top_p=1.0
+                  top_k=-1 # 0 for HF rollout, -1 for vLLM rollout
+                  val_top_p=0.7
+
+                  # Performance Related Parameter
+                  n_gpus=8
+                  sp_size=1
+                  use_dynamic_bsz=True
+                  actor_ppo_max_token_len=$((max_prompt_length + max_response_length))
+                  infer_ppo_max_token_len=$((max_prompt_length + max_response_length))
+                  offload=False
+                  gen_tp=1
+                  
+
+                  python3 -m recipe.dapo.main_dapo \
+                      reward_model.sandbox_fusion.url="${SANDBOX_FUSION_URL}" \
+                      reward_model.sandbox_fusion.max_concurrent=256 \
+                      reward_model.sandbox_fusion.memory_limit_mb=1024 \
+                      data.train_files="${TRAIN_FILE}" \
+                      data.val_files="${TEST_FILE}" \
+                      data.prompt_key=prompt \
+                      data.truncation='left' \
+                      data.max_prompt_length=${max_prompt_length} \
+                      data.max_response_length=${max_response_length} \
+                      data.gen_batch_size=${gen_prompt_bsz} \
+                      data.train_batch_size=${train_prompt_bsz} \
+                      actor_rollout_ref.rollout.n=${n_resp_per_prompt} \
+                      algorithm.adv_estimator=${adv_estimator} \
+                      algorithm.use_kl_in_reward=${use_kl_in_reward} \
+                      algorithm.kl_ctrl.kl_coef=${kl_coef} \
+                      actor_rollout_ref.actor.use_kl_loss=${use_kl_loss} \
+                      actor_rollout_ref.actor.kl_loss_coef=${kl_loss_coef} \
+                      actor_rollout_ref.actor.clip_ratio_low=${clip_ratio_low} \
+                      actor_rollout_ref.actor.clip_ratio_high=${clip_ratio_high} \
+                      actor_rollout_ref.actor.clip_ratio_c=10.0 \
+                      actor_rollout_ref.model.use_remove_padding=True \
+                      actor_rollout_ref.actor.use_dynamic_bsz=${use_dynamic_bsz} \
+                      actor_rollout_ref.ref.log_prob_use_dynamic_bsz=${use_dynamic_bsz} \
+                      actor_rollout_ref.rollout.log_prob_use_dynamic_bsz=${use_dynamic_bsz} \
+                      actor_rollout_ref.actor.ppo_max_token_len_per_gpu=${actor_ppo_max_token_len} \
+                      actor_rollout_ref.ref.log_prob_max_token_len_per_gpu=${infer_ppo_max_token_len} \
+                      actor_rollout_ref.rollout.log_prob_max_token_len_per_gpu=${infer_ppo_max_token_len} \
+                      actor_rollout_ref.model.path="${MODEL_PATH}" \
+                      actor_rollout_ref.model.enable_gradient_checkpointing=True \
+                      actor_rollout_ref.actor.optim.lr=1e-6 \
+                      actor_rollout_ref.actor.optim.lr_warmup_steps=10 \
+                      actor_rollout_ref.actor.optim.warmup_style='constant' \
+                      actor_rollout_ref.actor.optim.weight_decay=0.1 \
+                      actor_rollout_ref.actor.ppo_mini_batch_size=${train_prompt_mini_bsz} \
+                      actor_rollout_ref.actor.fsdp_config.param_offload=${offload} \
+                      actor_rollout_ref.actor.fsdp_config.optimizer_offload=${offload} \
+                      actor_rollout_ref.actor.entropy_coeff=0 \
+                      actor_rollout_ref.actor.grad_clip=1.0 \
+                      actor_rollout_ref.actor.ulysses_sequence_parallel_size=${sp_size} \
+                      actor_rollout_ref.rollout.calculate_log_probs=True \
+                      actor_rollout_ref.rollout.gpu_memory_utilization=0.80 \
+                      actor_rollout_ref.rollout.tensor_model_parallel_size=${gen_tp} \
+                      actor_rollout_ref.rollout.enable_chunked_prefill=True \
+                      actor_rollout_ref.rollout.max_num_batched_tokens=$((max_prompt_length + max_response_length)) \
+                      actor_rollout_ref.rollout.temperature=${temperature} \
+                      actor_rollout_ref.rollout.top_p=${top_p} \
+                      actor_rollout_ref.rollout.top_k="${top_k}" \
+                      actor_rollout_ref.rollout.val_kwargs.temperature=${temperature} \
+                      actor_rollout_ref.rollout.val_kwargs.top_p=${val_top_p} \
+                      actor_rollout_ref.rollout.val_kwargs.top_k=${top_k} \
+                      actor_rollout_ref.rollout.val_kwargs.do_sample=True \
+                      actor_rollout_ref.rollout.val_kwargs.n=1 \
+                      actor_rollout_ref.rollout.name=vllm \
+                      actor_rollout_ref.ref.fsdp_config.param_offload=${offload} \
+                      actor_rollout_ref.ref.ulysses_sequence_parallel_size=${sp_size} \
+                      actor_rollout_ref.actor.fsdp_config.fsdp_size=-1 \
+                      reward_model.reward_manager=dapo \
+                      reward_model.overlong_buffer.enable=${enable_overlong_buffer} \
+                      reward_model.overlong_buffer.len=${overlong_buffer_len} \
+                      reward_model.overlong_buffer.penalty_factor=${overlong_penalty_factor} \
+                      trainer.logger='["console","wandb"]' \
+                      trainer.project_name="${project_name}" \
+                      trainer.experiment_name="${exp_name}" \
+                      trainer.n_gpus_per_node=${n_gpus} \
+                      trainer.nnodes="${NNODES}" \
+                      trainer.val_before_train=True \
+                      trainer.test_freq=10 \
+                      trainer.save_freq=${save_freq} \
+                      trainer.total_epochs=10 \
+                      trainer.default_local_dir="${CKPTS_DIR}" \
+                      trainer.resume_mode=auto
+                  
+              volumeMounts:
+                - name: data
+                  mountPath: /data
+                - name: dshm
+                  mountPath: /dev/shm
+    
+    - replicas: 0  # Set to N-1 for N total nodes
+      name: worker
+      template:
+        spec:
+          hostNetwork: true
+          dnsPolicy: ClusterFirstWithHostNet
+          restartPolicy: Never
+          volumes:
+            - name: data
+              persistentVolumeClaim:
+                claimName: pvc-local-msr-redmond-01
+            - name: dshm
+              emptyDir:
+                medium: Memory
+                sizeLimit: 100Gi
+          tolerations:
+            - key: "nvidia.com/gpu"
+              operator: "Exists"
+              effect: "NoSchedule"
+          # imagePullSecrets:
+          #   - name: nlpaml
+          containers:
+            - name: worker
+              image: nlpaml.azurecr.io/slimerl/slime:latest
+              imagePullPolicy: Always
+              securityContext:
+                privileged: true
+              env:
+                - name: WANDB_API_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: michaelxu-wandb
+                      key: api-key
+                - name: WANDB_HOST
+                  value: "https://microsoft-research.wandb.io"
+                - name: WANDB_PROJECT
+                  value: "Volcano-Slime-FlowRL-MATH"
+                - name: GLOO_SOCKET_IFNAME
+                  value: "eno1"
+                - name: NCCL_SOCKET_IFNAME
+                  value: "eno1"
+                - name: NCCL_IB_DISABLE
+                  value: "0"
+                - name: NCCL_IB_HCA
+                  value: "mlx5"
+                - name: VERL_HOME
+                  value: "/data/michaelxu/verl"
+              resources:
+                requests:
+                  cpu: "180"
+                  memory: "2600Gi"
+                  nvidia.com/gpu: "8"
+                  rdma/rdma_shared_device_a: "1"
+                limits:
+                  cpu: "180"
+                  memory: "2600Gi"
+                  nvidia.com/gpu: "8"
+                  rdma/rdma_shared_device_a: "1"
+              command:
+                - /bin/bash
+                - "-c"
+                - |
+                  set -x
+                  
+                  # Get this worker's IP address from eno1 interface
+                  WORKER_IP=$(ip addr show eno1 | grep 'inet ' | awk '{print $2}' | cut -d'/' -f1)
+                  echo "Worker IP: $WORKER_IP"
+                  
+                  # Create log directory for this worker
+                  LOG_DIR="/data/users/michaelxu/logs/$(date +%Y%m%d_%H%M%S)_worker_${HOSTNAME}"
+                  mkdir -p "$LOG_DIR"
+                  
+                  # Redirect all output to log file
+                  exec > >(tee "$LOG_DIR/worker.log") 2>&1
+
+                  # Wait for Ray head node
+                  export HEAD_NODE_PORT=6379
+                  echo "Waiting for Ray head node at ${VC_MASTER_HOSTS}:${HEAD_NODE_PORT}..."
+                  
+                  while true; do
+                    if nc -z $VC_MASTER_HOSTS $HEAD_NODE_PORT 2>/dev/null; then
+                      echo "Ray head node is available. Joining cluster..."
+                      ray start --address=$VC_MASTER_HOSTS:$HEAD_NODE_PORT \
+                        --node-ip-address=$WORKER_IP \
+                        --num-gpus=8 \
+                        --disable-usage-stats
+                      if [ $? -eq 0 ]; then
+                        echo "Successfully joined Ray cluster!"
+                        break
+                      else
+                        echo "Failed to join. Retrying..."
+                      fi
+                    else
+                      echo "Head node not ready yet. Retrying..."
+                    fi
+                    sleep 5
+                  done
+                  
+                  echo "Ray worker joined cluster. Waiting for work..."
+                  sleep infinity
+              volumeMounts:
+                - name: data
+                  mountPath: /data
+                - name: dshm
+                  mountPath: /dev/shm

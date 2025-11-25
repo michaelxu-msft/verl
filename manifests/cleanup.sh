@@ -1,0 +1,1 @@
+kubectl get vcjob -o json | jq -r '.items[] | select(.metadata.name | startswith("michaelxu-flowrl-")) | select(.status.state.phase == "Completed" or .status.state.phase == "Failed" or .status.state.phase == "Terminated" or .status.state.phase == "Aborted") | .metadata.name' | xargs -r kubectl delete vcjob

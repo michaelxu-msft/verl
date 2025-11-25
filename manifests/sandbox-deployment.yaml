@@ -1,0 +1,72 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: michaelxu-flowrl-sandbox
+  namespace: msr-redmond
+  labels:
+    app: michaelxu-flowrl-sandbox
+spec:
+  replicas: 4
+  selector:
+    matchLabels:
+      app: michaelxu-flowrl-sandbox
+  template:
+    metadata:
+      labels:
+        app: michaelxu-flowrl-sandbox
+    spec:
+      restartPolicy: Always
+      imagePullSecrets:
+        - name: nlpaml
+      containers:
+        - name: sandbox
+          image: nlpaml.azurecr.io/codesandbox/server:latest
+          imagePullPolicy: Always
+          resources:
+            requests:
+              cpu: "30"
+              memory: "30Gi"
+            limits:
+              cpu: "30"
+              memory: "30Gi"
+          ports:
+            - containerPort: 8080
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /SandboxFusion
+              port: 8080
+              scheme: HTTP
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            successThreshold: 1
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /SandboxFusion
+              port: 8080
+              scheme: HTTP
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            timeoutSeconds: 3
+            successThreshold: 1
+            failureThreshold: 3
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: flowrl-sandbox-lb
+  namespace: msr-redmond
+  labels:
+    app: michaelxu-flowrl-sandbox
+spec:
+  type: ClusterIP
+  selector:
+    app: michaelxu-flowrl-sandbox
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+      protocol: TCP
+  sessionAffinity: None
