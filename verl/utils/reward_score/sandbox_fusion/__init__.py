@@ -68,7 +68,12 @@ def compute_score(
                 logger.error(f"Failed to parse test_cases JSON: {e}")
                 return 0.0, [{"error": "Invalid test_cases JSON format"}]
 
-        if test_cases is not None and "assert_case" in test_cases and isinstance(test_cases.get("assert_case"), list):
+        # Handle list format: [{"input": ..., "output": ...}, ...]
+        if isinstance(test_cases, list):
+            inputs = [tc.get("input", "") for tc in test_cases]
+            outputs = [tc.get("output", None) for tc in test_cases]
+            test_cases = {"inputs": inputs, "outputs": outputs}
+        elif test_cases is not None and "assert_case" in test_cases and isinstance(test_cases.get("assert_case"), list):
             assert_cases = test_cases.get("assert_case")
             test_cases.setdefault("inputs", ["" for _ in assert_cases])
             test_cases.setdefault("outputs", [None for _ in assert_cases])
