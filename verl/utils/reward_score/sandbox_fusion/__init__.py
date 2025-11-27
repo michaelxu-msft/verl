@@ -73,8 +73,17 @@ def compute_score(
             test_cases.setdefault("inputs", ["" for _ in assert_cases])
             test_cases.setdefault("outputs", [None for _ in assert_cases])
         elif not test_cases or "inputs" not in test_cases or "outputs" not in test_cases:
-            logger.error("Invalid test_cases structure.")
-            return 0.0, [{"error": "Invalid test_cases structure (missing inputs/outputs)"}]
+            missing_fields = []
+            if not test_cases:
+                error_msg = "test_cases is empty or None"
+            else:
+                if "inputs" not in test_cases:
+                    missing_fields.append("inputs")
+                if "outputs" not in test_cases:
+                    missing_fields.append("outputs")
+                error_msg = f"test_cases missing required fields: {', '.join(missing_fields)}"
+            logger.error(f"Invalid test_cases structure: {error_msg}")
+            return 0.0, [{"error": f"Invalid test_cases structure ({error_msg})"}]
 
         # Check all test cases
         # Note: The return value of check_correctness might need adaptation here
