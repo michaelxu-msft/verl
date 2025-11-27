@@ -49,7 +49,7 @@ def get_http_session():
                 # Set pool_maxsize high enough to handle concurrent requests
                 adapter = HTTPAdapter(
                     pool_connections=10,
-                    pool_maxsize=100,  # Should be >= max_concurrent setting
+                    pool_maxsize=200,  # Should be >= max_concurrent setting (e.g., 256)
                     max_retries=0,  # We handle retries manually
                     pool_block=False
                 )
