@@ -22,6 +22,7 @@ import uuid
 from typing import Any, Optional
 
 import requests
+from requests.adapters import HTTPAdapter
 
 DEFAULT_TIMEOUT = 10  # Default compile and run timeout
 MAX_RETRIES = 3
@@ -29,6 +30,32 @@ INITIAL_RETRY_DELAY = 1
 API_TIMEOUT = 10
 
 logger = logging.getLogger(__name__)
+
+# Create a session with connection pooling for HTTP connection reuse
+# This prevents ephemeral port exhaustion by reusing connections
+_http_session = None
+_session_lock = threading.Lock()
+
+def get_http_session():
+    """Get or create a shared HTTP session with connection pooling."""
+    global _http_session
+    if _http_session is None:
+        with _session_lock:
+            if _http_session is None:
+                _http_session = requests.Session()
+                # Configure connection pooling
+                # pool_connections: number of connection pools to cache
+                # pool_maxsize: maximum number of connections to save in the pool
+                # Set pool_maxsize high enough to handle concurrent requests
+                adapter = HTTPAdapter(
+                    pool_connections=10,
+                    pool_maxsize=100,  # Should be >= max_concurrent setting
+                    max_retries=0,  # We handle retries manually
+                    pool_block=False
+                )
+                _http_session.mount('http://', adapter)
+                _http_session.mount('https://', adapter)
+    return _http_session
 
 # Define supported languages list (optional, for documentation or validation)
 SUPPORTED_LANGUAGES = [
@@ -116,12 +143,15 @@ def call_sandbox_api(
 
     last_error = None  # Store the last error encountered
 
+    # Get the shared session for connection reuse
+    session = get_http_session()
+
     for attempt in range(MAX_RETRIES):
         try:
             logger.debug(
                 f"{log_prefix}Attempt {attempt + 1}/{MAX_RETRIES}: Calling sandbox API at {sandbox_fusion_url}"
             )  # <-- Use internal log_prefix
-            response = requests.post(
+            response = session.post(
                 sandbox_fusion_url,
                 headers=headers,
                 data=payload,
