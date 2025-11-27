@@ -10,8 +10,8 @@ spec:
   plugins:
     ssh: []
     svc: []
-    env: []        # VC_* envs (host lists, etc.)
-    pytorch: []    # set standard torch env vars
+    env: [] # VC_* envs (host lists, etc.)
+    pytorch: [] # set standard torch env vars
   policies:
     - event: TaskCompleted
       action: CompleteJob
@@ -40,8 +40,6 @@ spec:
             - key: "nvidia.com/gpu"
               operator: "Exists"
               effect: "NoSchedule"
-          # imagePullSecrets:
-          #   - name: nlpaml
           containers:
             - name: master
               image: verlai/verl:vllm011.latest
@@ -91,7 +89,7 @@ spec:
                 - |
                   echo "Starting Ray head node at $VC_MASTER_HOSTS"
                   ray start --head --node-ip-address $VC_MASTER_HOSTS --port=6379 --dashboard-host=0.0.0.0 --num-gpus=8 --disable-usage-stats
-                  
+
                   # Wait for worker nodes to join
                   DESIRED_NODES=$((VC_WORKER_NUM + 1))
                   NODE_COUNT=0
@@ -102,17 +100,17 @@ spec:
                     sleep 5
                   done
                   echo "Ray cluster ready with ${DESIRED_NODES} nodes!"
-                  
+
                   # Run script on head node
                   mkdir -p /workspace
                   # Install rllm package for custom reward functions
                   cd /workspace
                   git clone https://github.com/michaelxu-msft/rllm.git && cd rllm && pip3 install --no-deps -e .
-                  
+
                   # Then install VeRL
                   cd /workspace
                   git clone https://github.com/michaelxu-msft/verl.git && cd verl && pip3 install --no-deps -e .
-                  
+
 
                   # Download model if it doesn't exist
                   MODEL_NAME="deepseek-ai/DeepSeek-R1-Distill-Qwen-7B"
@@ -211,7 +209,7 @@ spec:
                   offload=False
                   rollout_mode=async
                   gen_tp=1
-                  
+
 
                   python3 -m recipe.dapo.main_dapo \
                       reward_model.sandbox_fusion.url="${SANDBOX_FUSION_URL}" \
@@ -286,14 +284,14 @@ spec:
                       trainer.total_epochs=10 \
                       trainer.default_local_dir="${CKPTS_DIR}" \
                       trainer.resume_mode=auto
-                  
+
               volumeMounts:
                 - name: data
                   mountPath: /data
                 - name: dshm
                   mountPath: /dev/shm
-    
-    - replicas: 0  # Set to N-1 for N total nodes
+
+    - replicas: 0 # Set to N-1 for N total nodes
       name: worker
       template:
         spec:
@@ -312,11 +310,9 @@ spec:
             - key: "nvidia.com/gpu"
               operator: "Exists"
               effect: "NoSchedule"
-          # imagePullSecrets:
-          #   - name: nlpaml
           containers:
             - name: worker
-              image: nlpaml.azurecr.io/slimerl/slime:latest
+              image: verlai/verl:vllm011.latest
               imagePullPolicy: Always
               securityContext:
                 privileged: true
@@ -328,8 +324,8 @@ spec:
                       key: api-key
                 - name: WANDB_HOST
                   value: "https://microsoft-research.wandb.io"
-                - name: WANDB_PROJECT
-                  value: "Volcano-Slime-FlowRL-MATH"
+                - name: WANDB_ENTITY
+                  value: "nlp"
                 - name: GLOO_SOCKET_IFNAME
                   value: "eno1"
                 - name: NCCL_SOCKET_IFNAME
@@ -356,22 +352,22 @@ spec:
                 - "-c"
                 - |
                   set -x
-                  
+
                   # Get this worker's IP address from eno1 interface
                   WORKER_IP=$(ip addr show eno1 | grep 'inet ' | awk '{print $2}' | cut -d'/' -f1)
                   echo "Worker IP: $WORKER_IP"
-                  
+
                   # Create log directory for this worker
                   LOG_DIR="/data/users/michaelxu/logs/$(date +%Y%m%d_%H%M%S)_worker_${HOSTNAME}"
                   mkdir -p "$LOG_DIR"
-                  
+
                   # Redirect all output to log file
                   exec > >(tee "$LOG_DIR/worker.log") 2>&1
 
                   # Wait for Ray head node
                   export HEAD_NODE_PORT=6379
                   echo "Waiting for Ray head node at ${VC_MASTER_HOSTS}:${HEAD_NODE_PORT}..."
-                  
+
                   while true; do
                     if nc -z $VC_MASTER_HOSTS $HEAD_NODE_PORT 2>/dev/null; then
                       echo "Ray head node is available. Joining cluster..."
@@ -390,7 +386,7 @@ spec:
                     fi
                     sleep 5
                   done
-                  
+
                   echo "Ray worker joined cluster. Waiting for work..."
                   sleep infinity
               volumeMounts:

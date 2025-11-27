@@ -10,8 +10,8 @@ spec:
   plugins:
     ssh: []
     svc: []
-    env: [] # VC_* envs (host lists, etc.)
-    pytorch: [] # set standard torch env vars
+    env: []        # VC_* envs (host lists, etc.)
+    pytorch: []    # set standard torch env vars
   policies:
     - event: TaskCompleted
       action: CompleteJob
@@ -21,6 +21,9 @@ spec:
     - replicas: 1
       name: master
       template:
+        metadata:
+          labels:
+            app: michaelxu-flowrl-code-sandbox
         spec:
           hostNetwork: true
           dnsPolicy: ClusterFirstWithHostNet
@@ -39,7 +42,7 @@ spec:
               effect: "NoSchedule"
           containers:
             - name: master
-              image: verlai/verl:vllm011.latest
+              image: verlai/verl:sgl055.latest
               imagePullPolicy: IfNotPresent
               securityContext:
                 privileged: true
@@ -71,12 +74,12 @@ spec:
                   value: "1"
               resources:
                 requests:
-                  cpu: "180"
+                  cpu: "32"
                   memory: "2600Gi"
                   nvidia.com/gpu: "8"
                   rdma/rdma_shared_device_a: "1"
                 limits:
-                  cpu: "180"
+                  cpu: "32"
                   memory: "2600Gi"
                   nvidia.com/gpu: "8"
                   rdma/rdma_shared_device_a: "1"
@@ -86,7 +89,7 @@ spec:
                 - |
                   echo "Starting Ray head node at $VC_MASTER_HOSTS"
                   ray start --head --node-ip-address $VC_MASTER_HOSTS --port=6379 --dashboard-host=0.0.0.0 --num-gpus=8 --disable-usage-stats
-
+                  
                   # Wait for worker nodes to join
                   DESIRED_NODES=$((VC_WORKER_NUM + 1))
                   NODE_COUNT=0
@@ -97,17 +100,17 @@ spec:
                     sleep 5
                   done
                   echo "Ray cluster ready with ${DESIRED_NODES} nodes!"
-
+                  
                   # Run script on head node
                   mkdir -p /workspace
                   # Install rllm package for custom reward functions
                   cd /workspace
                   git clone https://github.com/michaelxu-msft/rllm.git && cd rllm && pip3 install --no-deps -e .
-
+                  
                   # Then install VeRL
                   cd /workspace
                   git clone https://github.com/michaelxu-msft/verl.git && cd verl && pip3 install --no-deps -e .
-
+                  
 
                   # Download model if it doesn't exist
                   MODEL_NAME="deepseek-ai/DeepSeek-R1-Distill-Qwen-7B"
@@ -134,9 +137,10 @@ spec:
                                   
 
                   RAY_ADDRESS="http://${VC_MASTER_HOSTS}:8265" # The Ray cluster address to connect to
-                  # Use the standalone sandbox deployment with load balancer
-                  SANDBOX_FUSION_URL="http://flowrl-sandbox-lb.msr-redmond.svc.cluster.local:8080/run_code"
-                  echo "Sandbox LoadBalancer URL: ${SANDBOX_FUSION_URL}"
+                  # Use colocated sandboxes on same GPU node for zero-latency communication
+                  SANDBOX_FUSION_URL="http://flowrl-sandbox-colocated-lb.msr-redmond.svc.cluster.local:8080/run_code"
+                  echo "Sandbox URL (colocated): ${SANDBOX_FUSION_URL}"
+                  echo "With 4 sandbox replicas @ 44 cores each on same node"
                   WORKING_DIR="${PWD}" # The local directory to package to the Ray cluster
                   RUNTIME_ENV="./recipe/dapo/runtime_env.yaml" # This sets environment variables for the Ray cluster
                   NNODES=${DESIRED_NODES:-1}
@@ -145,7 +149,7 @@ spec:
                   # gen_dp=8  # Data parallelism for vLLM rollout
                   # Init VeRL Project.sh here
                   project_name='DAPO'
-                  exp_name="DAPO-${MODEL_NAME}-Code-VLLM"
+                  exp_name="DAPO-${MODEL_NAME}-Code-Sandbox-VLLM"
 
                   # Algorithm settings
                   adv_estimator=grpo
@@ -205,11 +209,12 @@ spec:
                   offload=False
                   rollout_mode=async
                   gen_tp=1
-
+                  
 
                   python3 -m recipe.dapo.main_dapo \
-                      custom_reward_function.path="${WORKING_DIR}/recipe/flowrl/reward.py" \
-                      custom_reward_function.name="_default_compute_score" \
+                      reward_model.sandbox_fusion.url="${SANDBOX_FUSION_URL}" \
+                      reward_model.sandbox_fusion.max_concurrent=128 \
+                      reward_model.sandbox_fusion.memory_limit_mb=1024 \
                       data.train_files="${TRAIN_FILE}" \
                       data.val_files="${TEST_FILE}" \
                       data.prompt_key=prompt \
@@ -259,7 +264,7 @@ spec:
                       actor_rollout_ref.rollout.val_kwargs.top_k=${top_k} \
                       actor_rollout_ref.rollout.val_kwargs.do_sample=True \
                       actor_rollout_ref.rollout.val_kwargs.n=1 \
-                      actor_rollout_ref.rollout.name=vllm \
+                      actor_rollout_ref.rollout.name=sglang \
                       actor_rollout_ref.rollout.mode=${rollout_mode} \
                       actor_rollout_ref.ref.fsdp_config.param_offload=${offload} \
                       actor_rollout_ref.ref.ulysses_sequence_parallel_size=${sp_size} \
@@ -279,14 +284,14 @@ spec:
                       trainer.total_epochs=10 \
                       trainer.default_local_dir="${CKPTS_DIR}" \
                       trainer.resume_mode=auto
-
+                  
               volumeMounts:
                 - name: data
                   mountPath: /data
                 - name: dshm
                   mountPath: /dev/shm
-
-    - replicas: 0 # Set to N-1 for N total nodes
+    
+    - replicas: 0  # Set to N-1 for N total nodes
       name: worker
       template:
         spec:
@@ -307,7 +312,7 @@ spec:
               effect: "NoSchedule"
           containers:
             - name: worker
-              image: verlai/verl:vllm011.latest
+              image: verlai/verl:sgl055.latest
               imagePullPolicy: Always
               securityContext:
                 privileged: true
@@ -333,12 +338,12 @@ spec:
                   value: "/data/michaelxu/verl"
               resources:
                 requests:
-                  cpu: "180"
+                  cpu: "208"
                   memory: "2600Gi"
                   nvidia.com/gpu: "8"
                   rdma/rdma_shared_device_a: "1"
                 limits:
-                  cpu: "180"
+                  cpu: "208"
                   memory: "2600Gi"
                   nvidia.com/gpu: "8"
                   rdma/rdma_shared_device_a: "1"
@@ -347,22 +352,22 @@ spec:
                 - "-c"
                 - |
                   set -x
-
+                  
                   # Get this worker's IP address from eno1 interface
                   WORKER_IP=$(ip addr show eno1 | grep 'inet ' | awk '{print $2}' | cut -d'/' -f1)
                   echo "Worker IP: $WORKER_IP"
-
+                  
                   # Create log directory for this worker
                   LOG_DIR="/data/users/michaelxu/logs/$(date +%Y%m%d_%H%M%S)_worker_${HOSTNAME}"
                   mkdir -p "$LOG_DIR"
-
+                  
                   # Redirect all output to log file
                   exec > >(tee "$LOG_DIR/worker.log") 2>&1
 
                   # Wait for Ray head node
                   export HEAD_NODE_PORT=6379
                   echo "Waiting for Ray head node at ${VC_MASTER_HOSTS}:${HEAD_NODE_PORT}..."
-
+                  
                   while true; do
                     if nc -z $VC_MASTER_HOSTS $HEAD_NODE_PORT 2>/dev/null; then
                       echo "Ray head node is available. Joining cluster..."
@@ -381,7 +386,7 @@ spec:
                     fi
                     sleep 5
                   done
-
+                  
                   echo "Ray worker joined cluster. Waiting for work..."
                   sleep infinity
               volumeMounts:
