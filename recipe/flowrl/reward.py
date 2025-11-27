@@ -216,10 +216,12 @@ def _default_compute_score(data_source, solution_str, ground_truth, **kwargs):
             **kwargs
         )
         
-        return float(result) if isinstance(result, (bool, int, float)) else float(result[0])
+        return float(result.reward)
     
     except Exception as e:
         print(f"Error computing code reward: {e}")
+        import traceback
+        traceback.print_exc()
         return 0.0
 
 
