@@ -51,8 +51,8 @@ spec:
                       key: api-key
                 - name: WANDB_BASE_URL
                   value: "https://microsoft-research.wandb.io"
-                - name: WANDB_PROJECT
-                  value: "Volcano-Slime-FlowRL-MATH"
+                - name: WANDB_ENTITY
+                  value: "nlp"
                 - name: GLOO_SOCKET_IFNAME
                   value: "eno1"
                 - name: NCCL_SOCKET_IFNAME
@@ -292,7 +292,7 @@ spec:
           #   - name: nlpaml
           containers:
             - name: worker
-              image: nlpaml.azurecr.io/slimerl/slime:latest
+              image: verlai/verl:sgl055.latest
               imagePullPolicy: Always
               securityContext:
                 privileged: true
@@ -302,7 +302,7 @@ spec:
                     secretKeyRef:
                       name: michaelxu-wandb
                       key: api-key
-                - name: WANDB_HOST
+                - name: WANDB_BASE_URL
                   value: "https://microsoft-research.wandb.io"
                 - name: WANDB_PROJECT
                   value: "Volcano-Slime-FlowRL-MATH"
@@ -315,7 +315,17 @@ spec:
                 - name: NCCL_IB_HCA
                   value: "mlx5"
                 - name: VERL_HOME
-                  value: "/data/michaelxu/verl"
+                  value: "/data/users/michaelxu/verl"
+                - name: DATA_DIR
+                  value: "/data/users/michaelxu/verl"
+                - name: RAY_DATA_HOME
+                  value: "/data/users/michaelxu/verl"
+                - name: TORCH_NCCL_AVOID_RECORD_STREAMS 
+                  value: "1"
+                - name: SGLANG_DISABLE_TP_MEMORY_INBALANCE_CHECK
+                  value: "True"
+                - name: PYTORCH_CUDA_ALLOC_CONF
+                  value: "expandable_segments:True"
               resources:
                 requests:
                   cpu: "180"

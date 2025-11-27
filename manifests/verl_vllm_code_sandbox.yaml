@@ -21,6 +21,9 @@ spec:
     - replicas: 1
       name: master
       template:
+        metadata:
+          labels:
+            app: michaelxu-flowrl-code-sandbox
         spec:
           hostNetwork: true
           dnsPolicy: ClusterFirstWithHostNet
@@ -53,8 +56,8 @@ spec:
                       key: api-key
                 - name: WANDB_BASE_URL
                   value: "https://microsoft-research.wandb.io"
-                - name: WANDB_PROJECT
-                  value: "Volcano-Slime-FlowRL-CODE"
+                - name: WANDB_ENTITY
+                  value: "nlp"
                 - name: GLOO_SOCKET_IFNAME
                   value: "eno1"
                 - name: NCCL_SOCKET_IFNAME
@@ -73,12 +76,12 @@ spec:
                   value: "1"
               resources:
                 requests:
-                  cpu: "180"
+                  cpu: "32"
                   memory: "2600Gi"
                   nvidia.com/gpu: "8"
                   rdma/rdma_shared_device_a: "1"
                 limits:
-                  cpu: "180"
+                  cpu: "32"
                   memory: "2600Gi"
                   nvidia.com/gpu: "8"
                   rdma/rdma_shared_device_a: "1"
@@ -136,9 +139,10 @@ spec:
                                   
 
                   RAY_ADDRESS="http://${VC_MASTER_HOSTS}:8265" # The Ray cluster address to connect to
-                  # Use the standalone sandbox deployment with load balancer
-                  SANDBOX_FUSION_URL="http://flowrl-sandbox-lb.msr-redmond.svc.cluster.local:8080/run_code"
-                  echo "Sandbox LoadBalancer URL: ${SANDBOX_FUSION_URL}"
+                  # Use colocated sandboxes on same GPU node for zero-latency communication
+                  SANDBOX_FUSION_URL="http://flowrl-sandbox-colocated-lb.msr-redmond.svc.cluster.local:8080/run_code"
+                  echo "Sandbox URL (colocated): ${SANDBOX_FUSION_URL}"
+                  echo "With 4 sandbox replicas @ 44 cores each on same node"
                   WORKING_DIR="${PWD}" # The local directory to package to the Ray cluster
                   RUNTIME_ENV="./recipe/dapo/runtime_env.yaml" # This sets environment variables for the Ray cluster
                   NNODES=${DESIRED_NODES:-1}
@@ -147,7 +151,7 @@ spec:
                   # gen_dp=8  # Data parallelism for vLLM rollout
                   # Init VeRL Project.sh here
                   project_name='DAPO'
-                  exp_name="DAPO-${MODEL_NAME}-Code-VLLM"
+                  exp_name="DAPO-${MODEL_NAME}-Code-Sandbox-VLLM"
 
                   # Algorithm settings
                   adv_estimator=grpo
@@ -163,7 +167,7 @@ spec:
                   clip_ratio_high=0.28
 
                   # Sequence lengths 
-                  max_prompt_length=$((1024 * 2))
+                  max_prompt_length=$((1024 * 3))
                   max_response_length=$((1024 * 8))
 
                   # Overlong buffer for very long responses
@@ -205,12 +209,13 @@ spec:
                   actor_ppo_max_token_len=$((max_prompt_length + max_response_length))
                   infer_ppo_max_token_len=$((max_prompt_length + max_response_length))
                   offload=False
+                  rollout_mode=async
                   gen_tp=1
                   
 
                   python3 -m recipe.dapo.main_dapo \
                       reward_model.sandbox_fusion.url="${SANDBOX_FUSION_URL}" \
-                      reward_model.sandbox_fusion.max_concurrent=256 \
+                      reward_model.sandbox_fusion.max_concurrent=128 \
                       reward_model.sandbox_fusion.memory_limit_mb=1024 \
                       data.train_files="${TRAIN_FILE}" \
                       data.val_files="${TEST_FILE}" \
@@ -262,6 +267,7 @@ spec:
                       actor_rollout_ref.rollout.val_kwargs.do_sample=True \
                       actor_rollout_ref.rollout.val_kwargs.n=1 \
                       actor_rollout_ref.rollout.name=vllm \
+                      actor_rollout_ref.rollout.mode=${rollout_mode} \
                       actor_rollout_ref.ref.fsdp_config.param_offload=${offload} \
                       actor_rollout_ref.ref.ulysses_sequence_parallel_size=${sp_size} \
                       actor_rollout_ref.actor.fsdp_config.fsdp_size=-1 \
@@ -336,12 +342,12 @@ spec:
                   value: "/data/michaelxu/verl"
               resources:
                 requests:
-                  cpu: "180"
+                  cpu: "208"
                   memory: "2600Gi"
                   nvidia.com/gpu: "8"
                   rdma/rdma_shared_device_a: "1"
                 limits:
-                  cpu: "180"
+                  cpu: "208"
                   memory: "2600Gi"
                   nvidia.com/gpu: "8"
                   rdma/rdma_shared_device_a: "1"

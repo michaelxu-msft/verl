@@ -53,8 +53,8 @@ spec:
                       key: api-key
                 - name: WANDB_BASE_URL
                   value: "https://microsoft-research.wandb.io"
-                - name: WANDB_PROJECT
-                  value: "Volcano-Slime-FlowRL-CODE"
+                - name: WANDB_ENTITY
+                  value: "nlp"
                 - name: GLOO_SOCKET_IFNAME
                   value: "eno1"
                 - name: NCCL_SOCKET_IFNAME
@@ -146,8 +146,8 @@ spec:
                   TEST_FILE="['/data/users/michaelxu/datasets/flowrl-data/code_data/test_livecodebench-00000-of-00005.parquet','/data/users/michaelxu/datasets/flowrl-data/code_data/test_livecodebench-00001-of-00005.parquet','/data/users/michaelxu/datasets/flowrl-data/code_data/test_livecodebench-00002-of-00005.parquet','/data/users/michaelxu/datasets/flowrl-data/code_data/test_livecodebench-00003-of-00005.parquet','/data/users/michaelxu/datasets/flowrl-data/code_data/test_livecodebench-00004-of-00005.parquet']"
                   # gen_dp=8  # Data parallelism for vLLM rollout
                   # Init VeRL Project.sh here
-                  project_name='FlowRL'
-                  exp_name="FlowRL-${MODEL_NAME}-Code-VLLM"
+                  project_name='DAPO'
+                  exp_name="DAPO-${MODEL_NAME}-Code-VLLM"
 
                   # Algorithm settings
                   adv_estimator=grpo
@@ -163,7 +163,7 @@ spec:
                   clip_ratio_high=0.28
 
                   # Sequence lengths 
-                  max_prompt_length=$((1024 * 2))
+                  max_prompt_length=$((1024 * 3))
                   max_response_length=$((1024 * 8))
 
                   # Overlong buffer for very long responses
@@ -205,6 +205,7 @@ spec:
                   actor_ppo_max_token_len=$((max_prompt_length + max_response_length))
                   infer_ppo_max_token_len=$((max_prompt_length + max_response_length))
                   offload=False
+                  rollout_mode=async
                   gen_tp=1
                   
 
@@ -261,10 +262,11 @@ spec:
                       actor_rollout_ref.rollout.val_kwargs.do_sample=True \
                       actor_rollout_ref.rollout.val_kwargs.n=1 \
                       actor_rollout_ref.rollout.name=vllm \
+                      actor_rollout_ref.rollout.mode=${rollout_mode} \
                       actor_rollout_ref.ref.fsdp_config.param_offload=${offload} \
                       actor_rollout_ref.ref.ulysses_sequence_parallel_size=${sp_size} \
                       actor_rollout_ref.actor.fsdp_config.fsdp_size=-1 \
-                      reward_model.reward_manager=code \
+                      reward_model.reward_manager=dapo \
                       reward_model.overlong_buffer.enable=${enable_overlong_buffer} \
                       reward_model.overlong_buffer.len=${overlong_buffer_len} \
                       reward_model.overlong_buffer.penalty_factor=${overlong_penalty_factor} \

@@ -1,21 +1,34 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: michaelxu-flowrl-sandbox
+  name: michaelxu-flowrl-sandbox-colocated
   namespace: msr-redmond
   labels:
-    app: michaelxu-flowrl-sandbox
+    app: michaelxu-flowrl-sandbox-colocated
 spec:
-  replicas: 4
+  replicas: 7
   selector:
     matchLabels:
-      app: michaelxu-flowrl-sandbox
+      app: michaelxu-flowrl-sandbox-colocated
   template:
     metadata:
       labels:
-        app: michaelxu-flowrl-sandbox
+        app: michaelxu-flowrl-sandbox-colocated
     spec:
       restartPolicy: Always
+      # Schedule these pods on the same node as michaelxu-flowrl-code-sandbox jobs
+      # Uses custom label to identify only your specific training jobs
+      affinity:
+        podAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchLabels:
+                  app: michaelxu-flowrl-code-sandbox
+              topologyKey: kubernetes.io/hostname
+      tolerations:
+        - key: "nvidia.com/gpu"
+          operator: "Exists"
+          effect: "NoSchedule"
       imagePullSecrets:
         - name: nlpaml
       containers:
@@ -24,17 +37,17 @@ spec:
           imagePullPolicy: Always
           resources:
             requests:
-              cpu: "30"
-              memory: "30Gi"
+              cpu: "16"
+              memory: "32Gi"
             limits:
-              cpu: "30"
-              memory: "30Gi"
+              cpu: "16"
+              memory: "32Gi"
           ports:
             - containerPort: 8080
               protocol: TCP
           livenessProbe:
             httpGet:
-              path: /SandboxFusion
+              path: v1/ping
               port: 8080
               scheme: HTTP
             initialDelaySeconds: 30
@@ -44,7 +57,7 @@ spec:
             failureThreshold: 3
           readinessProbe:
             httpGet:
-              path: /SandboxFusion
+              path: /v1/ping
               port: 8080
               scheme: HTTP
             initialDelaySeconds: 10
@@ -56,14 +69,14 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: flowrl-sandbox-lb
+  name: flowrl-sandbox-colocated-lb
   namespace: msr-redmond
   labels:
-    app: michaelxu-flowrl-sandbox
+    app: michaelxu-flowrl-sandbox-colocated
 spec:
   type: ClusterIP
   selector:
-    app: michaelxu-flowrl-sandbox
+    app: michaelxu-flowrl-sandbox-colocated
   ports:
     - name: http
       port: 8080

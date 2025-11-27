@@ -51,8 +51,8 @@ spec:
                       key: api-key
                 - name: WANDB_BASE_URL
                   value: "https://microsoft-research.wandb.io"
-                - name: WANDB_PROJECT
-                  value: "Volcano-Slime-FlowRL-MATH"
+                - name: WANDB_ENTITY
+                  value: "nlp"
                 - name: GLOO_SOCKET_IFNAME
                   value: "eno1"
                 - name: NCCL_SOCKET_IFNAME
